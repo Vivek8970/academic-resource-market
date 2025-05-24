@@ -1,6 +1,6 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, BookOpen, FileText, PresentationChart, FolderOpen, TrendingUp, Download, Upload } from "lucide-react";
+import { Users, BookOpen, FileText, Presentation, FolderOpen, TrendingUp, Download, Upload } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 const AdminDashboard = () => {
