@@ -9,7 +9,174 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      categories: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          icon: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          icon?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          icon?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      downloads: {
+        Row: {
+          downloaded_at: string | null
+          id: string
+          listing_id: string
+          user_id: string
+        }
+        Insert: {
+          downloaded_at?: string | null
+          id?: string
+          listing_id: string
+          user_id: string
+        }
+        Update: {
+          downloaded_at?: string | null
+          id?: string
+          listing_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "downloads_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "downloads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      listings: {
+        Row: {
+          category_id: string | null
+          course_code: string | null
+          created_at: string | null
+          description: string
+          download_count: number | null
+          file_size: number | null
+          file_type: string | null
+          id: string
+          language: string | null
+          main_file_url: string | null
+          preview_images: string[] | null
+          status: string | null
+          subject: string | null
+          tags: string[] | null
+          title: string
+          university: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          category_id?: string | null
+          course_code?: string | null
+          created_at?: string | null
+          description: string
+          download_count?: number | null
+          file_size?: number | null
+          file_type?: string | null
+          id?: string
+          language?: string | null
+          main_file_url?: string | null
+          preview_images?: string[] | null
+          status?: string | null
+          subject?: string | null
+          tags?: string[] | null
+          title: string
+          university?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          category_id?: string | null
+          course_code?: string | null
+          created_at?: string | null
+          description?: string
+          download_count?: number | null
+          file_size?: number | null
+          file_type?: string | null
+          id?: string
+          language?: string | null
+          main_file_url?: string | null
+          preview_images?: string[] | null
+          status?: string | null
+          subject?: string | null
+          tags?: string[] | null
+          title?: string
+          university?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "listings_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "listings_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          email: string
+          full_name: string | null
+          id: string
+          role: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email: string
+          full_name?: string | null
+          id: string
+          role?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          email?: string
+          full_name?: string | null
+          id?: string
+          role?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

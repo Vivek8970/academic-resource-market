@@ -1,87 +1,156 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Filter, Plus, MoreHorizontal, Eye, Edit, Trash, CheckCircle, X } from "lucide-react";
+import { Search, Filter, MoreHorizontal, Eye, Edit, Trash, CheckCircle, X, Download } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const ListingsManagement = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [listings, setListings] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
-  const listings = [
-    {
-      id: 1,
-      title: "Advanced Calculus Textbook - 10th Edition",
-      category: "Textbooks",
-      author: "Dr. Sarah Johnson",
-      price: "$45.00",
-      status: "approved",
-      uploadDate: "2024-05-20",
-      downloads: 23,
-      fileType: "PDF",
-      institution: "MIT"
-    },
-    {
-      id: 2,
-      title: "Machine Learning Lecture Notes - CS229",
-      category: "Notes",
-      author: "Mike Chen",
-      price: "$15.00",
-      status: "pending",
-      uploadDate: "2024-05-22",
-      downloads: 0,
-      fileType: "PDF",
-      institution: "Stanford"
-    },
-    {
-      id: 3,
-      title: "Introduction to Psychology PowerPoint",
-      category: "Presentations",
-      author: "Emma Davis",
-      price: "$20.00",
-      status: "approved",
-      uploadDate: "2024-05-18",
-      downloads: 45,
-      fileType: "PPT",
-      institution: "Harvard"
-    },
-    {
-      id: 4,
-      title: "Web Development Final Project",
-      category: "Projects",
-      author: "James Wilson",
-      price: "$30.00",
-      status: "rejected",
-      uploadDate: "2024-05-19",
-      downloads: 2,
-      fileType: "ZIP",
-      institution: "Yale"
-    },
-    {
-      id: 5,
-      title: "Organic Chemistry Lab Manual",
-      category: "Textbooks",
-      author: "Dr. Lisa Anderson",
-      price: "$35.00",
-      status: "approved",
-      uploadDate: "2024-05-15",
-      downloads: 67,
-      fileType: "PDF",
-      institution: "Princeton"
+  useEffect(() => {
+    fetchListings();
+    fetchCategories();
+  }, []);
+
+  const fetchListings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('listings')
+        .select(`
+          *,
+          profiles(full_name),
+          categories(name)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setListings(data || []);
+    } catch (error: any) {
+      console.error('Error fetching listings:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch listings",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name');
+
+      if (error) throw error;
+      setCategories(data || []);
+    } catch (error: any) {
+      console.error('Error fetching categories:', error);
+    }
+  };
+
+  const updateListingStatus = async (listingId: string, newStatus: string) => {
+    try {
+      const { error } = await supabase
+        .from('listings')
+        .update({ status: newStatus })
+        .eq('id', listingId);
+
+      if (error) throw error;
+
+      setListings(prev =>
+        prev.map(listing =>
+          listing.id === listingId ? { ...listing, status: newStatus } : listing
+        )
+      );
+
+      toast({
+        title: "Status Updated",
+        description: `Listing ${newStatus} successfully`,
+      });
+    } catch (error: any) {
+      console.error('Error updating status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update listing status",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const deleteListing = async (listingId: string) => {
+    try {
+      const { error } = await supabase
+        .from('listings')
+        .delete()
+        .eq('id', listingId);
+
+      if (error) throw error;
+
+      setListings(prev => prev.filter(listing => listing.id !== listingId));
+
+      toast({
+        title: "Listing Deleted",
+        description: "Listing removed successfully",
+      });
+    } catch (error: any) {
+      console.error('Error deleting listing:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete listing",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const downloadFile = async (listing: any) => {
+    if (!listing.main_file_url) return;
+
+    try {
+      const { data, error } = await supabase.storage
+        .from('listings')
+        .download(listing.main_file_url);
+
+      if (error) throw error;
+
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = listing.title;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error('Error downloading file:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download file",
+        variant: "destructive",
+      });
+    }
+  };
 
   const filteredListings = listings.filter(listing => {
     const matchesSearch = listing.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         listing.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         listing.institution.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = filterCategory === "all" || listing.category === filterCategory;
+                         listing.profiles?.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         listing.university?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = filterCategory === "all" || listing.categories?.name === filterCategory;
     const matchesStatus = filterStatus === "all" || listing.status === filterStatus;
     return matchesSearch && matchesCategory && matchesStatus;
   });
@@ -99,20 +168,30 @@ const ListingsManagement = () => {
     }
   };
 
-  const getCategoryBadge = (category: string) => {
-    switch (category) {
-      case "Textbooks":
+  const getCategoryBadge = (categoryName: string | null) => {
+    if (!categoryName) return <Badge variant="outline">Uncategorized</Badge>;
+    
+    switch (categoryName) {
+      case "textbooks":
         return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Textbooks</Badge>;
-      case "Notes":
+      case "notes":
         return <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">Notes</Badge>;
-      case "Presentations":
+      case "presentations":
         return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Presentations</Badge>;
-      case "Projects":
+      case "projects":
         return <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100">Projects</Badge>;
       default:
-        return <Badge variant="outline">{category}</Badge>;
+        return <Badge variant="outline" className="capitalize">{categoryName}</Badge>;
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -121,14 +200,10 @@ const ListingsManagement = () => {
           <h1 className="text-3xl font-bold text-slate-800">Listings Management</h1>
           <p className="text-slate-600 mt-1">Manage educational materials and approve submissions</p>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Listing
-        </Button>
       </div>
 
       {/* Filters and Search */}
-      <Card className="bg-white border-slate-200">
+      <Card className="bg-white border-slate-200 shadow-lg">
         <CardContent className="p-6">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
@@ -137,23 +212,24 @@ const ListingsManagement = () => {
                 placeholder="Search listings by title, author, or institution..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 border-slate-200 focus:border-blue-500"
               />
             </div>
             <Select value={filterCategory} onValueChange={setFilterCategory}>
-              <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px] border-slate-200 focus:border-blue-500">
                 <SelectValue placeholder="Filter by category" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="Textbooks">Textbooks</SelectItem>
-                <SelectItem value="Notes">Notes</SelectItem>
-                <SelectItem value="Presentations">Presentations</SelectItem>
-                <SelectItem value="Projects">Projects</SelectItem>
+                {categories.map(category => (
+                  <SelectItem key={category.id} value={category.name} className="capitalize">
+                    {category.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="w-full sm:w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px] border-slate-200 focus:border-blue-500">
                 <Filter className="h-4 w-4 mr-2" />
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
@@ -169,7 +245,7 @@ const ListingsManagement = () => {
       </Card>
 
       {/* Listings Table */}
-      <Card className="bg-white border-slate-200">
+      <Card className="bg-white border-slate-200 shadow-lg">
         <CardHeader>
           <CardTitle className="text-xl text-slate-800">All Listings ({filteredListings.length})</CardTitle>
         </CardHeader>
@@ -181,7 +257,6 @@ const ListingsManagement = () => {
                   <TableHead>Title</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Author</TableHead>
-                  <TableHead>Price</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Downloads</TableHead>
                   <TableHead>Upload Date</TableHead>
@@ -194,31 +269,40 @@ const ListingsManagement = () => {
                     <TableCell>
                       <div>
                         <p className="font-medium text-slate-800 max-w-[200px] truncate">{listing.title}</p>
-                        <p className="text-sm text-slate-500">{listing.fileType} • {listing.institution}</p>
+                        <p className="text-sm text-slate-500">{listing.file_type} • {listing.university || 'Unknown'}</p>
                       </div>
                     </TableCell>
-                    <TableCell>{getCategoryBadge(listing.category)}</TableCell>
+                    <TableCell>{getCategoryBadge(listing.categories?.name)}</TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{listing.author}</span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="font-medium text-slate-800">{listing.price}</span>
+                      <span className="text-sm text-slate-600">{listing.profiles?.full_name || 'Unknown'}</span>
                     </TableCell>
                     <TableCell>{getStatusBadge(listing.status)}</TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{listing.downloads}</span>
+                      <span className="text-sm text-slate-600">{listing.download_count || 0}</span>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-slate-600">{listing.uploadDate}</span>
+                      <span className="text-sm text-slate-600">
+                        {new Date(listing.created_at).toLocaleDateString()}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center space-x-2">
                         {listing.status === "pending" && (
                           <>
-                            <Button size="sm" variant="outline" className="text-green-600 border-green-200 hover:bg-green-50">
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="text-green-600 border-green-200 hover:bg-green-50"
+                              onClick={() => updateListingStatus(listing.id, 'approved')}
+                            >
                               <CheckCircle className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50">
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => updateListingStatus(listing.id, 'rejected')}
+                            >
                               <X className="h-4 w-4" />
                             </Button>
                           </>
@@ -230,6 +314,10 @@ const ListingsManagement = () => {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => downloadFile(listing)}>
+                              <Download className="h-4 w-4 mr-2" />
+                              Download File
+                            </DropdownMenuItem>
                             <DropdownMenuItem>
                               <Eye className="h-4 w-4 mr-2" />
                               View Details
@@ -238,7 +326,10 @@ const ListingsManagement = () => {
                               <Edit className="h-4 w-4 mr-2" />
                               Edit Listing
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-red-600">
+                            <DropdownMenuItem 
+                              className="text-red-600"
+                              onClick={() => deleteListing(listing.id)}
+                            >
                               <Trash className="h-4 w-4 mr-2" />
                               Delete Listing
                             </DropdownMenuItem>

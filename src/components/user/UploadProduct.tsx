@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,6 @@ import {
   Upload, 
   FileText, 
   Image, 
-  DollarSign, 
   Tag, 
   X,
   CheckCircle,
@@ -19,88 +18,213 @@ import {
   BookOpen,
   Presentation,
   Briefcase,
-  Plus
+  Plus,
+  Loader2
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const UploadProduct = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    category: "",
-    price: "",
-    tags: [] as string[],
+    category_id: "",
     university: "",
-    course: "",
+    course_code: "",
     subject: "",
     language: "English"
   });
   const [currentTag, setCurrentTag] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [previewImages, setPreviewImages] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [user, setUser] = useState<any>(null);
 
-  const categories = [
-    { value: "textbooks", label: "Textbooks", icon: BookOpen },
-    { value: "notes", label: "Notes", icon: FileText },
-    { value: "presentations", label: "Presentations", icon: Presentation },
-    { value: "projects", label: "Projects", icon: Briefcase }
-  ];
+  useEffect(() => {
+    checkUser();
+    fetchCategories();
+  }, []);
+
+  const checkUser = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      navigate('/auth');
+      return;
+    }
+    setUser(session.user);
+  };
+
+  const fetchCategories = async () => {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .order('name');
+    
+    if (error) {
+      console.error('Error fetching categories:', error);
+    } else {
+      setCategories(data || []);
+    }
+  };
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const addTag = () => {
-    if (currentTag.trim() && !formData.tags.includes(currentTag.trim())) {
-      setFormData(prev => ({
-        ...prev,
-        tags: [...prev.tags, currentTag.trim()]
-      }));
+    if (currentTag.trim() && !tags.includes(currentTag.trim())) {
+      setTags(prev => [...prev, currentTag.trim()]);
       setCurrentTag("");
     }
   };
 
   const removeTag = (tagToRemove: string) => {
-    setFormData(prev => ({
-      ...prev,
-      tags: prev.tags.filter(tag => tag !== tagToRemove)
-    }));
+    setTags(prev => prev.filter(tag => tag !== tagToRemove));
   };
 
   const handleFileUpload = (files: FileList | null, type: 'main' | 'preview') => {
     if (!files) return;
     
     const fileArray = Array.from(files);
+    
     if (type === 'main') {
-      setUploadedFiles(fileArray);
+      // Validate file types for main files
+      const allowedTypes = [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/zip'
+      ];
+      
+      const validFiles = fileArray.filter(file => 
+        allowedTypes.includes(file.type) && file.size <= 50 * 1024 * 1024 // 50MB limit
+      );
+      
+      if (validFiles.length !== fileArray.length) {
+        toast({
+          title: "Invalid Files",
+          description: "Some files were rejected. Please use PDF, DOC, DOCX, PPT, PPTX, or ZIP files under 50MB.",
+          variant: "destructive",
+        });
+      }
+      
+      setUploadedFiles(validFiles);
     } else {
-      setPreviewImages(fileArray);
+      // Validate image files
+      const validImages = fileArray.filter(file => 
+        file.type.startsWith('image/') && file.size <= 10 * 1024 * 1024 // 10MB limit
+      );
+      
+      if (validImages.length !== fileArray.length) {
+        toast({
+          title: "Invalid Images",
+          description: "Some images were rejected. Please use JPG, PNG, or GIF files under 10MB.",
+          variant: "destructive",
+        });
+      }
+      
+      setPreviewImages(validImages);
     }
+  };
+
+  const uploadFileToStorage = async (file: File, folder: string) => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${user.id}/${folder}/${Date.now()}.${fileExt}`;
+    
+    const { data, error } = await supabase.storage
+      .from('listings')
+      .upload(fileName, file);
+    
+    if (error) throw error;
+    return data.path;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
+    
     setIsSubmitting(true);
     
-    // Simulate upload process
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsSubmitting(false);
-    // Navigate to dashboard or show success message
-    navigate('/dashboard?tab=listings');
+    try {
+      // Upload main files
+      const mainFileUrls = await Promise.all(
+        uploadedFiles.map(file => uploadFileToStorage(file, 'files'))
+      );
+      
+      // Upload preview images
+      const previewImageUrls = await Promise.all(
+        previewImages.map(file => uploadFileToStorage(file, 'previews'))
+      );
+      
+      // Create listing
+      const { data, error } = await supabase
+        .from('listings')
+        .insert({
+          user_id: user.id,
+          title: formData.title,
+          description: formData.description,
+          category_id: formData.category_id || null,
+          university: formData.university || null,
+          course_code: formData.course_code || null,
+          subject: formData.subject || null,
+          language: formData.language,
+          tags: tags,
+          main_file_url: mainFileUrls[0], // Store first file as main
+          preview_images: previewImageUrls,
+          file_type: uploadedFiles[0]?.type || null,
+          file_size: uploadedFiles[0]?.size || null,
+          status: 'pending'
+        })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      toast({
+        title: "Upload Successful!",
+        description: "Your material has been submitted for review.",
+      });
+      
+      navigate('/dashboard?tab=listings');
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      toast({
+        title: "Upload Failed",
+        description: error.message || "Failed to upload material. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const isFormValid = formData.title && formData.description && formData.category && 
-                     formData.price && uploadedFiles.length > 0;
+  const isFormValid = formData.title && formData.description && uploadedFiles.length > 0;
+
+  const getCategoryIcon = (iconName: string) => {
+    switch (iconName) {
+      case 'BookOpen': return BookOpen;
+      case 'FileText': return FileText;
+      case 'Presentation': return Presentation;
+      case 'Briefcase': return Briefcase;
+      default: return FileText;
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-800 mb-2">Upload Educational Material</h1>
-          <p className="text-slate-600">Share your knowledge and earn from your academic materials</p>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
+            Share Your Knowledge
+          </h1>
+          <p className="text-slate-600">Upload educational materials and help fellow learners succeed</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -108,10 +232,10 @@ const UploadProduct = () => {
             {/* Main Form */}
             <div className="lg:col-span-2 space-y-6">
               {/* Basic Information */}
-              <Card>
+              <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
-                    <FileText className="h-5 w-5" />
+                    <FileText className="h-5 w-5 text-blue-600" />
                     <span>Basic Information</span>
                   </CardTitle>
                 </CardHeader>
@@ -123,7 +247,7 @@ const UploadProduct = () => {
                       value={formData.title}
                       onChange={(e) => handleInputChange('title', e.target.value)}
                       placeholder="e.g., Advanced Calculus - Complete Notes Package"
-                      className="mt-1"
+                      className="mt-1 border-slate-200 focus:border-blue-500 transition-colors"
                       required
                     />
                   </div>
@@ -135,98 +259,38 @@ const UploadProduct = () => {
                       value={formData.description}
                       onChange={(e) => handleInputChange('description', e.target.value)}
                       placeholder="Describe your material, what it covers, and why it's valuable..."
-                      className="mt-1 min-h-[120px]"
+                      className="mt-1 min-h-[120px] border-slate-200 focus:border-blue-500 transition-colors"
                       required
                     />
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <Label htmlFor="category">Category *</Label>
-                      <Select value={formData.category} onValueChange={(value) => handleInputChange('category', value)}>
-                        <SelectTrigger className="mt-1">
+                      <Label htmlFor="category">Category</Label>
+                      <Select value={formData.category_id} onValueChange={(value) => handleInputChange('category_id', value)}>
+                        <SelectTrigger className="mt-1 border-slate-200 focus:border-blue-500">
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {categories.map((category) => (
-                            <SelectItem key={category.value} value={category.value}>
-                              <div className="flex items-center space-x-2">
-                                <category.icon className="h-4 w-4" />
-                                <span>{category.label}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
+                          {categories.map((category) => {
+                            const IconComponent = getCategoryIcon(category.icon);
+                            return (
+                              <SelectItem key={category.id} value={category.id}>
+                                <div className="flex items-center space-x-2">
+                                  <IconComponent className="h-4 w-4" />
+                                  <span className="capitalize">{category.name}</span>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
                         </SelectContent>
                       </Select>
                     </div>
 
                     <div>
-                      <Label htmlFor="price">Price (USD) *</Label>
-                      <div className="relative mt-1">
-                        <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
-                        <Input
-                          id="price"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={formData.price}
-                          onChange={(e) => handleInputChange('price', e.target.value)}
-                          placeholder="25.00"
-                          className="pl-10"
-                          required
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Academic Details */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Academic Details</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="university">University</Label>
-                      <Input
-                        id="university"
-                        value={formData.university}
-                        onChange={(e) => handleInputChange('university', e.target.value)}
-                        placeholder="e.g., Stanford University"
-                        className="mt-1"
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="course">Course Code</Label>
-                      <Input
-                        id="course"
-                        value={formData.course}
-                        onChange={(e) => handleInputChange('course', e.target.value)}
-                        placeholder="e.g., MATH 101"
-                        className="mt-1"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="subject">Subject</Label>
-                      <Input
-                        id="subject"
-                        value={formData.subject}
-                        onChange={(e) => handleInputChange('subject', e.target.value)}
-                        placeholder="e.g., Mathematics"
-                        className="mt-1"
-                      />
-                    </div>
-
-                    <div>
                       <Label htmlFor="language">Language</Label>
                       <Select value={formData.language} onValueChange={(value) => handleInputChange('language', value)}>
-                        <SelectTrigger className="mt-1">
+                        <SelectTrigger className="mt-1 border-slate-200 focus:border-blue-500">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -239,6 +303,49 @@ const UploadProduct = () => {
                       </Select>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+
+              {/* Academic Details */}
+              <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
+                <CardHeader>
+                  <CardTitle>Academic Details</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="university">University</Label>
+                      <Input
+                        id="university"
+                        value={formData.university}
+                        onChange={(e) => handleInputChange('university', e.target.value)}
+                        placeholder="e.g., Stanford University"
+                        className="mt-1 border-slate-200 focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="course">Course Code</Label>
+                      <Input
+                        id="course"
+                        value={formData.course_code}
+                        onChange={(e) => handleInputChange('course_code', e.target.value)}
+                        placeholder="e.g., MATH 101"
+                        className="mt-1 border-slate-200 focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="subject">Subject</Label>
+                    <Input
+                      id="subject"
+                      value={formData.subject}
+                      onChange={(e) => handleInputChange('subject', e.target.value)}
+                      placeholder="e.g., Mathematics"
+                      className="mt-1 border-slate-200 focus:border-blue-500 transition-colors"
+                    />
+                  </div>
 
                   <div>
                     <Label htmlFor="tags">Tags</Label>
@@ -248,21 +355,21 @@ const UploadProduct = () => {
                         onChange={(e) => setCurrentTag(e.target.value)}
                         placeholder="Add a tag and press Enter"
                         onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
-                        className="flex-1"
+                        className="flex-1 border-slate-200 focus:border-blue-500 transition-colors"
                       />
-                      <Button type="button" onClick={addTag} size="sm">
+                      <Button type="button" onClick={addTag} size="sm" className="bg-blue-600 hover:bg-blue-700">
                         <Plus className="h-4 w-4" />
                       </Button>
                     </div>
-                    {formData.tags.length > 0 && (
+                    {tags.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {formData.tags.map((tag, index) => (
+                        {tags.map((tag, index) => (
                           <Badge key={index} variant="secondary" className="flex items-center space-x-1">
                             <span>{tag}</span>
                             <button
                               type="button"
                               onClick={() => removeTag(tag)}
-                              className="ml-1 hover:text-red-600"
+                              className="ml-1 hover:text-red-600 transition-colors"
                             >
                               <X className="h-3 w-3" />
                             </button>
@@ -275,20 +382,20 @@ const UploadProduct = () => {
               </Card>
 
               {/* File Uploads */}
-              <Card>
+              <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
-                    <Upload className="h-5 w-5" />
+                    <Upload className="h-5 w-5 text-blue-600" />
                     <span>File Uploads</span>
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div>
-                    <Label htmlFor="main-files">Main Files *</Label>
-                    <div className="mt-2 border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                      <Upload className="h-8 w-8 mx-auto text-slate-400 mb-2" />
-                      <p className="text-slate-600 mb-2">Drag and drop your files here, or click to browse</p>
-                      <p className="text-sm text-slate-500">Supports PDF, DOC, DOCX, PPT, PPTX, ZIP (Max 50MB)</p>
+                    <Label htmlFor="main-files">Educational Material Files *</Label>
+                    <div className="mt-2 border-2 border-dashed border-blue-200 rounded-lg p-6 text-center hover:border-blue-400 transition-colors bg-blue-50/50">
+                      <Upload className="h-8 w-8 mx-auto text-blue-400 mb-2" />
+                      <p className="text-slate-600 mb-2">Upload your educational materials</p>
+                      <p className="text-sm text-slate-500">Supports PDF, DOC, DOCX, PPT, PPTX, ZIP (Max 50MB per file)</p>
                       <input
                         type="file"
                         id="main-files"
@@ -300,7 +407,7 @@ const UploadProduct = () => {
                       <Button
                         type="button"
                         variant="outline"
-                        className="mt-2"
+                        className="mt-2 border-blue-200 text-blue-600 hover:bg-blue-50"
                         onClick={() => document.getElementById('main-files')?.click()}
                       >
                         Select Files
@@ -310,10 +417,10 @@ const UploadProduct = () => {
                     {uploadedFiles.length > 0 && (
                       <div className="mt-3 space-y-2">
                         {uploadedFiles.map((file, index) => (
-                          <div key={index} className="flex items-center justify-between p-2 bg-slate-50 rounded">
+                          <div key={index} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
                             <div className="flex items-center space-x-2">
-                              <FileText className="h-4 w-4 text-blue-600" />
-                              <span className="text-sm">{file.name}</span>
+                              <FileText className="h-4 w-4 text-green-600" />
+                              <span className="text-sm font-medium">{file.name}</span>
                               <span className="text-xs text-slate-500">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
                             </div>
                             <CheckCircle className="h-4 w-4 text-green-600" />
@@ -325,8 +432,8 @@ const UploadProduct = () => {
 
                   <div>
                     <Label htmlFor="preview-images">Preview Images (Optional)</Label>
-                    <div className="mt-2 border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
-                      <Image className="h-8 w-8 mx-auto text-slate-400 mb-2" />
+                    <div className="mt-2 border-2 border-dashed border-purple-200 rounded-lg p-6 text-center hover:border-purple-400 transition-colors bg-purple-50/50">
+                      <Image className="h-8 w-8 mx-auto text-purple-400 mb-2" />
                       <p className="text-slate-600 mb-2">Upload preview images to showcase your material</p>
                       <p className="text-sm text-slate-500">Supports JPG, PNG, GIF (Max 10MB each)</p>
                       <input
@@ -340,7 +447,7 @@ const UploadProduct = () => {
                       <Button
                         type="button"
                         variant="outline"
-                        className="mt-2"
+                        className="mt-2 border-purple-200 text-purple-600 hover:bg-purple-50"
                         onClick={() => document.getElementById('preview-images')?.click()}
                       >
                         Select Images
@@ -354,7 +461,7 @@ const UploadProduct = () => {
                             <img
                               src={URL.createObjectURL(file)}
                               alt={`Preview ${index + 1}`}
-                              className="w-full h-20 object-cover rounded"
+                              className="w-full h-20 object-cover rounded-lg border border-slate-200"
                             />
                             <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full p-1">
                               <CheckCircle className="h-3 w-3" />
@@ -371,7 +478,7 @@ const UploadProduct = () => {
             {/* Sidebar */}
             <div className="space-y-6">
               {/* Preview Card */}
-              <Card>
+              <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
                 <CardHeader>
                   <CardTitle>Listing Preview</CardTitle>
                 </CardHeader>
@@ -402,72 +509,41 @@ const UploadProduct = () => {
                     </div>
                     
                     <div className="flex items-center justify-between">
-                      <span className="text-lg font-bold text-blue-600">
-                        ${formData.price || "0.00"}
-                      </span>
-                      {formData.category && (
-                        <Badge>{categories.find(c => c.value === formData.category)?.label}</Badge>
+                      <span className="text-lg font-bold text-green-600">FREE</span>
+                      {formData.category_id && (
+                        <Badge className="bg-blue-100 text-blue-800">
+                          {categories.find(c => c.id === formData.category_id)?.name}
+                        </Badge>
                       )}
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Tips Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Tips for Success</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex items-start space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                      <p>Use clear, descriptive titles</p>
-                    </div>
-                    <div className="flex items-start space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                      <p>Add detailed descriptions</p>
-                    </div>
-                    <div className="flex items-start space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                      <p>Include preview images</p>
-                    </div>
-                    <div className="flex items-start space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                      <p>Price competitively</p>
-                    </div>
-                    <div className="flex items-start space-x-2">
-                      <CheckCircle className="h-4 w-4 text-green-600 mt-0.5" />
-                      <p>Use relevant tags</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
               {/* Submit Button */}
-              <Card>
+              <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
                 <CardContent className="p-4">
                   {!isFormValid && (
                     <div className="flex items-center space-x-2 text-amber-600 mb-4">
                       <AlertCircle className="h-4 w-4" />
-                      <span className="text-sm">Please fill in all required fields</span>
+                      <span className="text-sm">Please fill in required fields and upload files</span>
                     </div>
                   )}
                   
                   <Button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg"
                     disabled={!isFormValid || isSubmitting}
                   >
                     {isSubmitting ? (
                       <>
-                        <Upload className="h-4 w-4 mr-2 animate-spin" />
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         Uploading...
                       </>
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Upload Material
+                        Share Material
                       </>
                     )}
                   </Button>
