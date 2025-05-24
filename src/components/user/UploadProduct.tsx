@@ -11,7 +11,6 @@ import {
   Upload, 
   FileText, 
   Image, 
-  Tag, 
   X,
   CheckCircle,
   AlertCircle,
@@ -100,7 +99,8 @@ const UploadProduct = () => {
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'application/vnd.ms-powerpoint',
         'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'application/zip'
+        'application/zip',
+        'text/plain'
       ];
       
       const validFiles = fileArray.filter(file => 
@@ -110,7 +110,7 @@ const UploadProduct = () => {
       if (validFiles.length !== fileArray.length) {
         toast({
           title: "Invalid Files",
-          description: "Some files were rejected. Please use PDF, DOC, DOCX, PPT, PPTX, or ZIP files under 50MB.",
+          description: "Some files were rejected. Please use PDF, DOC, DOCX, PPT, PPTX, TXT, or ZIP files under 50MB.",
           variant: "destructive",
         });
       }
@@ -136,11 +136,14 @@ const UploadProduct = () => {
 
   const uploadFileToStorage = async (file: File, folder: string) => {
     const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}/${folder}/${Date.now()}.${fileExt}`;
+    const fileName = `${user.id}/${folder}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     
     const { data, error } = await supabase.storage
       .from('listings')
-      .upload(fileName, file);
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
     
     if (error) throw error;
     return data.path;
@@ -153,6 +156,8 @@ const UploadProduct = () => {
     setIsSubmitting(true);
     
     try {
+      console.log('Starting upload process...');
+      
       // Upload main files
       const mainFileUrls = await Promise.all(
         uploadedFiles.map(file => uploadFileToStorage(file, 'files'))
@@ -163,36 +168,64 @@ const UploadProduct = () => {
         previewImages.map(file => uploadFileToStorage(file, 'previews'))
       );
       
-      // Create listing
+      console.log('Files uploaded, creating listing...');
+      
+      // Create listing with approved status for immediate visibility
+      const listingData = {
+        user_id: user.id,
+        title: formData.title,
+        description: formData.description,
+        category_id: formData.category_id || null,
+        university: formData.university || null,
+        course_code: formData.course_code || null,
+        subject: formData.subject || null,
+        language: formData.language,
+        tags: tags.length > 0 ? tags : null,
+        main_file_url: mainFileUrls.length > 0 ? mainFileUrls[0] : null,
+        preview_images: previewImageUrls.length > 0 ? previewImageUrls : null,
+        file_type: uploadedFiles[0]?.type || null,
+        file_size: uploadedFiles[0]?.size || null,
+        status: 'approved', // Auto-approve for immediate visibility
+        download_count: 0
+      };
+      
+      console.log('Listing data:', listingData);
+      
       const { data, error } = await supabase
         .from('listings')
-        .insert({
-          user_id: user.id,
-          title: formData.title,
-          description: formData.description,
-          category_id: formData.category_id || null,
-          university: formData.university || null,
-          course_code: formData.course_code || null,
-          subject: formData.subject || null,
-          language: formData.language,
-          tags: tags,
-          main_file_url: mainFileUrls[0], // Store first file as main
-          preview_images: previewImageUrls,
-          file_type: uploadedFiles[0]?.type || null,
-          file_size: uploadedFiles[0]?.size || null,
-          status: 'pending'
-        })
+        .insert(listingData)
         .select()
         .single();
       
-      if (error) throw error;
+      if (error) {
+        console.error('Database error:', error);
+        throw error;
+      }
+      
+      console.log('Listing created successfully:', data);
       
       toast({
         title: "Upload Successful!",
-        description: "Your material has been submitted for review.",
+        description: "Your material has been published and is now available in the marketplace.",
       });
       
-      navigate('/dashboard?tab=listings');
+      // Reset form
+      setFormData({
+        title: "",
+        description: "",
+        category_id: "",
+        university: "",
+        course_code: "",
+        subject: "",
+        language: "English"
+      });
+      setTags([]);
+      setUploadedFiles([]);
+      setPreviewImages([]);
+      
+      // Navigate to marketplace to see the uploaded item
+      navigate('/marketplace');
+      
     } catch (error: any) {
       console.error('Upload error:', error);
       toast({
@@ -224,7 +257,7 @@ const UploadProduct = () => {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
             Share Your Knowledge
           </h1>
-          <p className="text-slate-600">Upload educational materials and help fellow learners succeed</p>
+          <p className="text-slate-600">Upload educational materials and help fellow learners succeed - completely free!</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -395,14 +428,14 @@ const UploadProduct = () => {
                     <div className="mt-2 border-2 border-dashed border-blue-200 rounded-lg p-6 text-center hover:border-blue-400 transition-colors bg-blue-50/50">
                       <Upload className="h-8 w-8 mx-auto text-blue-400 mb-2" />
                       <p className="text-slate-600 mb-2">Upload your educational materials</p>
-                      <p className="text-sm text-slate-500">Supports PDF, DOC, DOCX, PPT, PPTX, ZIP (Max 50MB per file)</p>
+                      <p className="text-sm text-slate-500">Supports PDF, DOC, DOCX, PPT, PPTX, TXT, ZIP (Max 50MB per file)</p>
                       <input
                         type="file"
                         id="main-files"
                         multiple
                         onChange={(e) => handleFileUpload(e.target.files, 'main')}
                         className="hidden"
-                        accept=".pdf,.doc,.docx,.ppt,.pptx,.zip"
+                        accept=".pdf,.doc,.docx,.ppt,.pptx,.zip,.txt"
                       />
                       <Button
                         type="button"
@@ -538,18 +571,18 @@ const UploadProduct = () => {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Uploading...
+                        Publishing...
                       </>
                     ) : (
                       <>
                         <Upload className="h-4 w-4 mr-2" />
-                        Share Material
+                        Publish Material
                       </>
                     )}
                   </Button>
                   
                   <p className="text-xs text-slate-500 mt-2 text-center">
-                    Your material will be reviewed before going live
+                    Your material will be immediately available in the marketplace
                   </p>
                 </CardContent>
               </Card>
